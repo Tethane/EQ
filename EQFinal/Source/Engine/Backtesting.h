@@ -78,7 +78,7 @@ public:
 	}
 
 	// Deserialize from JSON string
-	Backtest deserialize(const std::string& jsonString) {
+	static Backtest deserialize(const std::string& jsonString) {
 		json j = json::parse(jsonString);
 		return j.get<Backtest>();
 	}

@@ -43,6 +43,15 @@
   <ItemGroup>
     <Text Include="EQFinal\Source\Engine\generation.txt" />
   </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="EQFinal\Tests\breakout.cu">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="EQFinal\Source\Data\stockdata.csv" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{BFDCED06-BF2F-406C-AC25-1F6531BE4A41}</ProjectGuid>
     <RootNamespace>EQFinal</RootNamespace>

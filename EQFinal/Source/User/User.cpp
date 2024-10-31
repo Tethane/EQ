@@ -35,7 +35,7 @@ void User::deleteBacktest(int id)
 	}
 }
 
-Backtest User::getBacktest(int id)
+Backtest& User::getBacktest(int id)
 {
 	for (auto& system : m_systems)
 	{

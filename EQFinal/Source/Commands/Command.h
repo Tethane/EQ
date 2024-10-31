@@ -22,5 +22,6 @@ namespace EQ
 		Ptr<User> user;
 		int id;
 		std::atomic<bool> cancelled;
+		std::function<void(const std::string&)> callback;
 	};
 }

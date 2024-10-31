@@ -70,12 +70,6 @@ void Engine::removeCommand(int id)
 	}
 }
 
-void Engine::setBacktestProcessedCallback(BacktestProcessedCallback callback)
-{
-	onBacktestProcessed = callback;
-}
-
-
 void Engine::runMainThread()
 {
 	while (m_running)
@@ -84,7 +78,7 @@ void Engine::runMainThread()
 
 		if (!m_commandQueue.empty() && !m_processing.load())
 		{
-			m_processing.store(true);
+			m_processing = true;
 
 			if (m_backThread.joinable())
 			{
@@ -134,101 +128,123 @@ void Engine::processCommands()
 
 		backtest();
 
-		// Backtest over, print the backtest through callback
-
+		// Backtest over, print the backtest by serializing the result and triggering callback
 		Backtest result = m_currentCommand->user->getBacktest(m_currentCommand->id);
-		std::string source = result.serialize();
+		std::string serializedResult = result.serialize();
 
-		if (onBacktestProcessed)
-		{
-			onBacktestProcessed(source);
+		// Call the callback with the serialized result
+		if (command->callback) {
+			command->callback(serializedResult);
 		}
 	}
 }
 
 void Engine::backtest()
 {
-	// 1. Parse the source code to get the backtest metadata information
-
-	System system;
-	system.addBacktest(m_currentCommand->id);
-	system.parse(m_currentCommand->source); // Parse the system script + metadata
-
-	// 2. Connector queries data for the engine
-
-	Backtest backtest = system.getCurrentBacktest();
-
-	devec<Databar> data;
-	m_connector->query(backtest, data);
-
-	// 3. Generate Parameter Combinations (currently brute force, we are going to fix this)
-
-	std::vector<std::vector<int>> paramSets;
-
-	for (const auto& param : backtest.parameterDefinitions)
-	{
-		std::vector<int> pSet;
-
-		std::visit([&](auto&& value) {
-			using T = std::decay_t<decltype(value)>;
-
-			if constexpr (std::is_same_v<T, int>)
-			{
-				pSet.push_back(value);
-			}
-			else if constexpr (std::is_same_v<T, std::pair<int, int>>)
-			{
-				for (size_t i = value.first; i <= value.second; ++i)
-				{
-					pSet.push_back(i);
-				}
-			}
-			else if constexpr (std::is_same_v<T, std::vector<int>>)
-			{
-				pSet = value;
-			}
-			}, param.value);
-	}
-
-	std::vector<std::vector<int>> combinations;
-	std::vector<int> currentCombination(paramSets.size());
-
-	generateCombinations(paramSets, currentCombination, 0, combinations);
-
-	size_t rows = combinations.size();
-	size_t cols = combinations[0].size();
-	size_t totalSize = rows * cols;
-
-	devec<int> paramCombinations;
-
-	for (size_t i = 0; i < rows; ++i)
-	{
-		for (size_t j = 0; j < cols; ++j)
-		{
-			paramCombinations.push_back(combinations[i][j]);
-		}
-	}
-
-	// 4. Setup AggregatePerformanceData array
-
-	devec<AggregatePerformanceData> results;
-	results.allocate(paramCombinations.size());
-
-	// 5. Setup AccountData
-
-	AccountData accountData;
-	accountData.equity = backtest.capital;
-	accountData.cash = accountData.equity;
-	accountData.netAL = 0.0f;
-
-	// 6. Generate the CUDA file
-
-	std::string source = generateCudaFile(system.getIntern(), system.getExtern());
-
-	// 7. Dynamic Compilation of the CUDA
-
 	try
 	{
+		// 1. Parse the source code to get the backtest metadata information
+
+		System system;
+		system.addBacktest(m_currentCommand->id);
+		system.parse(m_currentCommand->source); // Parse the system script + metadata
+
+		m_currentCommand->user->addSystem(system);
+
+		// 2. Connector queries data for the engine
+
+		Backtest backtest = system.getCurrentBacktest();
+
+		devec<Databar>* data = new devec<Databar>();
+		m_connector->query(backtest, (*data));
+
+		// Check if API ran out of daily requests (use predownloaded google data)
+
+		bool noData = true;
+
+		
+		if (noData)
+		{
+			std::vector<Security> stocks;
+			std::string filepath = "C:\\Users\\Owner\\source\\repos\\EQFinal\\EQFinal\\Source\\Data\\stockdata.csv";
+			readCsvFile(filepath, stocks);
+
+			// Get data specific to GOOG
+			for (size_t i = stocks[0].prices.size() - 501; i < stocks[0].prices.size(); ++i)
+			{
+				Databar db = stocks[0].prices[i];
+				data->push_back(db);
+			}
+		}
+
+		// 3. Generate Parameter Combinations (currently brute force, we are going to fix this)
+
+		std::vector<std::vector<int>> paramSets;
+
+		for (const auto& param : backtest.parameterDefinitions)
+		{
+			std::vector<int> pSet;
+
+			std::visit([&](auto&& value) {
+				using T = std::decay_t<decltype(value)>;
+
+				if constexpr (std::is_same_v<T, int>)
+				{
+					pSet.push_back(value);
+				}
+				else if constexpr (std::is_same_v<T, std::pair<int, int>>)
+				{
+					for (size_t i = value.first; i <= value.second; ++i)
+					{
+						pSet.push_back(i);
+					}
+				}
+				else if constexpr (std::is_same_v<T, std::vector<int>>)
+				{
+					pSet = value;
+				}
+				}, param.value);
+
+			paramSets.push_back(pSet);
+		}
+
+		std::vector<std::vector<int>> combinations;
+		std::vector<int> currentCombination(paramSets.size());
+
+		generateCombinations(paramSets, currentCombination, 0, combinations);
+
+		size_t rows = combinations.size();
+		size_t cols = combinations[0].size();
+		size_t totalSize = rows * cols;
+
+		devec<int>* paramCombinations = new devec<int>();
+
+		for (size_t i = 0; i < rows; ++i)
+		{
+			for (size_t j = 0; j < cols; ++j)
+			{
+				paramCombinations->push_back(combinations[i][j]);
+			}
+		}
+
+		// 4. Setup AggregatePerformanceData array
+
+		devec<AggregatePerformanceData>* results = new devec<AggregatePerformanceData>();
+		results->allocate(paramCombinations->size());
+
+		// 5. Setup AccountData
+
+		AccountData accountData;
+		accountData.equity = backtest.capital;
+		accountData.cash = accountData.equity;
+		accountData.netAL = 0.0f;
+
+		// 6. Generate the CUDA file
+
+		std::string source = generateCudaFile(system.getIntern(), system.getExtern());
+
+		// 7. Dynamic Compilation of the CUDA
+		
 		//	7.1. Create Nvrtc Program
 		nvrtcProgram prog;
 		cudaCheckNvrtc(nvrtcCreateProgram(&prog, source.c_str(), "eqCudaBacktest.cu", 0, nullptr, nullptr));
@@ -266,7 +282,7 @@ void Engine::backtest()
 		CUcontext cuContext;
 		cudaCheck(cuCtxCreate(&cuContext, 0, cuDevice));
 
-		//	7.4. Create Link State (sneaky link)
+		//	7.4. Create Link State
 		CUlinkState linkState;
 		CUjit_option jitOptions[] = { CU_JIT_OPTIMIZATION_LEVEL, CU_JIT_LOG_VERBOSE };
 		void* jitOptionValues[] = { (void*)4, (void*)1 };
@@ -305,10 +321,10 @@ void Engine::backtest()
 		int threadsPerBlock = 256;
 		int blocksPerGrid = (combinations.size() + threadsPerBlock - 1) / threadsPerBlock;
 
-		Databar* dataPtr = data.data();
-		int dataLength = data.size();
-		int* paramCombinationsPtr = paramCombinations.data();
-		AggregatePerformanceData* resultsPtr = results.data();
+		Databar* dataPtr = data->data();
+		int dataLength = data->size();
+		int* paramCombinationsPtr = paramCombinations->data();
+		AggregatePerformanceData* resultsPtr = results->data();
 
 		void* args[] = {
 			&dataPtr,
@@ -331,7 +347,6 @@ void Engine::backtest()
 		cudaCheck(cuCtxSynchronize());
 
 		// 9. Process Results and Push to User's Backtests
-		Backtest finalResults = backtest;
 
 		// Populate results
 		int bestIndex = 0;
@@ -340,22 +355,26 @@ void Engine::backtest()
 
 		for (size_t i = 0; i < combinations.size(); ++i)
 		{
-			finalResults.resultsByParameterSet.push_back(results[i]);
-			maxPNL = max(maxPNL, results[i].totalPNL);
+			backtest.resultsByParameterSet.push_back((*results)[i]);
+			maxPNL = max(maxPNL, (*results)[i].totalPNL);
 		}
 
 		for (size_t i = 0; i < combinations.size(); ++i)
 		{
-			if (results[i].totalPNL == maxPNL)
+			if ((*results)[i].totalPNL == maxPNL)
 			{
 				bestIndex = i;
 				break;
 			}
 		}
 
-		finalResults.optimalParameterSet = combinations[bestIndex];
+		backtest.optimalParameterSet = combinations[bestIndex];
 
-		m_currentCommand->user->addBacktest(system, finalResults);
+		m_currentCommand->user->addBacktest(system, backtest);
+
+		delete data;
+		delete paramCombinations;
+		delete results;
 	}
 	catch (const std::exception& e)
 	{
@@ -385,7 +404,7 @@ void Engine::insertAfterMarker(std::string& code, const std::string& marker, con
 std::string Engine::generateCudaFile(std::string& internScript, std::string& externScript)
 {
 	std::string code;
-	readTxtFile("generation.txt", code);
+	readTxtFile("C:\\Users\\Owner\\source\\repos\\EQFinal\\EQFinal\\Source\\Engine\\generation.txt", code);
 
 	insertAfterMarker(code, "// Intern", internScript);
 	insertAfterMarker(code, "// Extern", externScript);

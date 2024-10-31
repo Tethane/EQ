@@ -10,9 +10,7 @@ namespace EQ
 	class Engine
 	{
 	public:
-		using BacktestProcessedCallback = void(*)(const std::string& source);
-
-		Engine() : onBacktestProcessed(nullptr)
+		Engine()
 		{
 			m_connector = std::make_shared<Connector>();
 		}
@@ -27,8 +25,9 @@ namespace EQ
 
 		void addCommand(Ptr<EngineCommand>);
 		void removeCommand(int id);
-
-		void setBacktestProcessedCallback(BacktestProcessedCallback callback);
+		
+		bool isRunning() const { return m_running.load(); }
+		bool isProcessing() const { return m_processing.load(); }
 
 	private:
 
@@ -42,8 +41,6 @@ namespace EQ
 		void backtest();
 
 	private:
-		BacktestProcessedCallback onBacktestProcessed;
-
 		std::thread m_hostThread; // I/O
 
 		std::vector<std::thread> m_workerThreads; // Live trading
