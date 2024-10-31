@@ -2,7 +2,7 @@
 #include "Backtesting.h"
 using namespace EQ;
 
-// Serialization and Deserialization Methods for Compatibility with C++/CLI and Passing Data Through Callbacks
+// Serialization and Deserialization Methods for Passing Data Through Callbacks
 
 void to_json(json& j, const ExecutableParameter& param) {
 	j = json{

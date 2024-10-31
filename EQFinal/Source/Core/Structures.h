@@ -4,6 +4,7 @@
 
 namespace EQ
 {
+	// Thread-safe queue for backtest command processing in the multi-threaded application
 	template<typename T>
 	class Queue
 	{

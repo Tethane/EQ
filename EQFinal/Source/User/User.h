@@ -7,6 +7,7 @@
 
 namespace EQ
 {
+	// User (for future use in the C# WPF Application when multiple users could use the same machine)
 	class User
 	{
 	public:

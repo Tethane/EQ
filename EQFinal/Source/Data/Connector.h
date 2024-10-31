@@ -24,7 +24,7 @@ namespace EQ
 		bool isBetween(const std::string& date, const std::string& startDate, const std::string& endDate);
 
 	private:
-		std::string key = "0MGUOODFZE54PIO1";
+		std::string key = "0MGUOODFZE54PIO1"; // My free API key for AlphaVantage (25 requests per day), use your own if you have premium
 		std::string baseURL = "https://www.alphavantage.co/query";
 	};
 

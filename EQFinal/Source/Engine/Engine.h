@@ -7,6 +7,7 @@
 
 namespace EQ
 {
+	// Main Event Handler for backtest commands (TODO: portfolio optimization, alternative backtesting using BoTorch, and live trading / connection to IB)
 	class Engine
 	{
 	public:

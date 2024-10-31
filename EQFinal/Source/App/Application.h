@@ -6,6 +6,7 @@
 
 namespace EQ
 {
+	// Singleton designed for use in multi-threaded application (when integrating with the C++/CLI and C# WPF application in the future)
 	class Application
 	{
 	public:

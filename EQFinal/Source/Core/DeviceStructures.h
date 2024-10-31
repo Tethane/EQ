@@ -4,6 +4,7 @@
 
 namespace EQ
 {
+	// Device Vector: an std::vector-like container that is compatible with CUDA architectures 
 	template<typename T>
 	class devec {
 	private:

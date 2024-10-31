@@ -68,10 +68,10 @@ int main(int argc, char* argv)
 		case 1:
 		{
 			// C:\Users\Owner\source\repos\EQFinal\EQFinal\Tests\breakout.cu
-			std::string codePath = "C:\\Users\\Owner\\source\\repos\\EQFinal\\EQFinal\\Tests\\breakout.cu";
+			std::string codePath;
 
-			//std::cout << "Enter path to strategy code file: ";
-			//std::cin >> codePath;
+			std::cout << "Enter path to strategy code file: ";
+			std::cin >> codePath;
 
 			std::string source;
 			EQ::readTxtFile(codePath, source);

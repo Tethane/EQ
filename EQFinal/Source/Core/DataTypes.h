@@ -4,10 +4,12 @@
 
 namespace EQ
 {
+	// Primitive data types for backtesting (these are all redefined in the engine cuda generated code)
+
 	enum OrderType { BUY = 1, SELL = -1, HOLD = 0 };
 
-#define FLOAT_MAX 1000000.0f
-#define FLOAT_MIN -1000000.0f
+	#define FLOAT_MAX 1000000.0f
+	#define FLOAT_MIN -1000000.0f
 
 	struct Databar
 	{
@@ -31,13 +33,12 @@ namespace EQ
 		int shares = 0;
 	};
 
+	// When backtesting, main is used when there is no currently open trade/defined condition is false, and alt is used when that condition is true
 	struct OrderCombination
 	{
 		Order main;
 		Order alt;
 	};
-
-
 
 	struct AccountData
 	{
@@ -46,7 +47,7 @@ namespace EQ
 		// Equity = cash + (assets - liabilities)
 		float equity = 0.0f; // Equity = Assets - Liabilities;
 		float cash = 0.0f; // Cash is an asset
-		float netAL = 0.0f; // Net assets - liabilities
+		float netAL = 0.0f; // Net assets - liabilities (excluding cash)
 
 		int netShares = 0;
 		float avgPrice = 0.0f;
@@ -54,6 +55,7 @@ namespace EQ
 		float takeprofit = 0.0f; // Max gain that can be taken for current trade
 	};
 
+	// For every time step through the backtest, AccountData is updated
 	struct AccountDataTracker
 	{
 		__host__ __device__ AccountDataTracker() {}

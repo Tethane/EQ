@@ -10,6 +10,7 @@ namespace EQ
 
     void readCsvFile(const std::string& filepath, std::vector<Security>& securities);
 
+    // Extern EQC++ code from within the <predef>, <intern>, or <extern> tags
     void extractBlocks(const std::string& text, const std::string& startTag, const std::string& endTag, std::string& output);
 
     void removeWhitespace(std::string& input);
@@ -46,11 +47,14 @@ namespace EQ
 
     Parameter parseParameter(const std::vector<Token>& tokens, size_t& i);
 
+    // For debugging purposes
     void printBlock(const Block& block);
 
     void printParameter(const Parameter& param);
 
+    // Convert the EQC++ code into device-compatible code by adding __host__ __device__ qualifiers
     void addDeviceHostQualifiers(std::string& source);
 
+    // Pre-load/define the parameters
     void insertParameterDefinitions(std::string& source, const std::vector<Parameter>& parameters);
 }

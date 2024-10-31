@@ -6,6 +6,7 @@
 
 namespace EQ
 {
+	// Trading System
 	class System
 	{
 	public:

@@ -52,6 +52,7 @@ struct AggregatePerformanceData
 	int takeprofitsHit = 0;
 };
 
+// Backtest Data
 struct Backtest
 {
 public:
