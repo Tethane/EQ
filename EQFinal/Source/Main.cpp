@@ -33,6 +33,40 @@ void displayBacktest(const Backtest& backtest)
 	{
 		std::cout << backtest.parameterDefinitions[i].name << ": " << backtest.optimalParameterSet[i] << "\n";
 	}
+
+	float maxPNL = -100000.0f;
+
+	for (int i = 0; i < backtest.resultsByParameterSet.size(); ++i)
+	{
+		auto results = backtest.resultsByParameterSet[i];
+		std::cout << "Results for param combination: " << i << "\n";
+		std::cout << "Starting Equity: " << results.startEquity << " End Equity: " << results.endEquity << "\n";
+		std::cout << "Total PNL: " << results.totalPNL << " Max Drawdown: " << results.maxDrawdown << "\n";
+		std::cout << "Sharpe Ratio: " << results.sharpeRatio << " Sortino Ratio: " << results.sortinoRatio << "\n";
+		std::cout << "Total Trades: " << results.totalTrades << " Winners: " << results.winners << " Losers: " << results.losers << " Success Rate: " << results.successRate << "\n";
+		std::cout << "Best Trade: " << results.bestTrade << " Worst Trade: " << results.worstTrade << "\n";
+		std::cout << "Stoplosses Hit: " << results.stoplossesHit << " Take Profits Hit: " << results.takeprofitsHit << "\n";
+		std::cout << "\n";
+		std::cout << "\n";
+
+		maxPNL = max(maxPNL, results.totalPNL);
+	}
+
+	int bestIndex = 0;
+
+	for (int i = 0; i < backtest.resultsByParameterSet.size(); ++i)
+	{
+		if (backtest.resultsByParameterSet[i].sharpeRatio == maxPNL)
+		{
+			bestIndex = i;
+			break;
+		}
+	}
+
+	std::cout << "\n==============\n";
+	std::cout << "Results: " << std::endl;
+	std::cout << "Best Parameter Combination at Index: " << bestIndex << std::endl;
+	std::cout << "Max Profit: " << maxPNL << std::endl;
 }
 
 int main(int argc, char* argv)
