@@ -1,0 +1,771 @@
+//
+// Device Vector
+//
+
+template<typename T>
+class devec {
+private:
+	T* m_dataManaged; // Data stored in unified memory (i.e created on host and used in device code)
+	T* m_data; // Data stored in device memory (i.e created on device and used in device code)
+	size_t m_size;
+	size_t m_capacity;
+	bool isManaged; // Is the devec managed or unmanaged
+
+public:
+	__host__ __device__ devec() : m_size(0), m_capacity(0), m_data(nullptr), m_dataManaged(nullptr)
+	{
+#ifndef __CUDA_ARCH__
+		isManaged = true;
+#else
+		isManaged = false;
+#endif
+		allocate(m_capacity);
+	}
+
+	/*
+	__host__ devec(const std::vector<T>& other) : m_size(0), m_capacity(0), m_data(nullptr), m_dataManaged(nullptr)
+	{
+#ifndef __CUDA_ARCH__
+		isManaged = true;
+#else
+		isManaged = false;
+#endif
+		m_size = other.size();
+		m_capacity = other.capacity();
+		allocate(m_capacity);
+	}
+	*/
+
+	__host__ __device__ devec(T* rawDataPtr, int n) : m_size(0), m_capacity(0), m_data(nullptr), m_dataManaged(nullptr)
+	{
+		m_size = n;
+		m_capacity = n + 1;
+		
+#ifndef __CUDA_ARCH__
+		isManaged = true;
+		allocate(m_capacity);
+		m_dataManaged = rawDataPtr;
+#else
+		isManaged = false;
+		allocate(m_capacity);
+		m_data = rawDataPtr;
+#endif
+		
+	}
+
+
+	__host__ __device__ ~devec()
+	{
+		if (m_data)
+			cudaFree(m_data);
+		if (m_dataManaged)
+			cudaFree(m_dataManaged);
+	}
+
+	__host__ __device__ T& operator[](size_t idx)
+	{
+		if (isManaged)
+			return m_dataManaged[idx];
+		else
+			return m_data[idx];
+	}
+
+	__host__ __device__ const T& operator[](size_t idx) const
+	{
+		if (isManaged)
+			return m_dataManaged[idx];
+		else
+			return m_data[idx];
+	}
+	
+	__host__ __device__ size_t size() const
+	{
+		return m_size;
+	}
+
+	__host__ __device__ size_t capacity() const
+	{
+		return m_capacity;
+	}
+
+	__host__ __device__ T* data() const
+	{
+		if (isManaged)
+			return m_dataManaged;
+		else
+			return m_data;
+	}
+
+	__host__ __device__ void push_back(const T& value)
+	{
+		if (m_size == m_capacity)
+			allocate(m_capacity == 0 ? 1 : m_capacity * 2);
+		
+		if (isManaged)
+			m_dataManaged[m_size] = value;
+		else
+			m_data[m_size] = value;
+
+		m_size++;
+	}
+
+	__host__ __device__ void pop_back()
+	{
+		if (m_size > 0)
+			--m_size;
+	}
+
+	__host__ __device__ void erase(size_t index)
+	{
+		if (index < m_size)
+		{
+
+			if (isManaged)
+#ifndef __CUDA_ARCH__
+				cudaMemcpy(m_dataManaged + index, m_dataManaged + index + 1, (m_size - index - 1) * sizeof(T), cudaMemcpyDefault);
+#endif
+			else
+				memcpy(m_data + index, m_data + index + 1, (m_size - index - 1) * sizeof(T));
+
+			--m_size;
+		}
+	}
+
+	__host__ __device__ void resize(size_t newSize)
+	{
+		if (newSize > m_capacity)
+			allocate(newSize);
+		m_size = newSize;
+	}
+
+	__host__ __device__ void allocate(size_t newCapacity)
+	{
+		if (newCapacity <= m_capacity)
+			return;
+
+		T* newData = nullptr;
+
+
+		if (isManaged)
+		{
+#ifndef __CUDA_ARCH__
+			cudaError_t err = cudaMallocManaged(&newData, newCapacity * sizeof(T));
+			if (err != cudaSuccess)
+			{
+				printf("Critical Error: Device cudaMallocManaged failed\n");
+				return;
+			}
+
+			if (m_dataManaged && m_size > 0)
+				cudaMemcpy(newData, m_dataManaged, m_size * sizeof(T), cudaMemcpyDefault);
+			
+			if (m_dataManaged)
+				cudaFree(m_dataManaged);
+
+			m_dataManaged = newData;
+#endif
+		}
+		else
+		{
+			newData = (T*)malloc(newCapacity * sizeof(T));
+			if (!newData)
+			{
+				printf("Critical Error: Device malloc failed\n");
+				return;
+			}
+			
+			if (m_data && m_size > 0)
+				memcpy(newData, m_data, m_size * sizeof(T));
+
+			if (m_data)
+				free(m_data);
+
+			m_data = newData;
+		}
+		m_capacity = newCapacity;
+	}
+};
+
+//
+// Backtest Data Structures
+//
+
+
+enum Type { BUY = 1, SELL = -1, HOLD = 0 };
+
+#define FLOAT_MAX 1000000.0f
+#define FLOAT_MIN -100000.0f
+
+struct Databar
+{
+	__host__ __device__ Databar() {}
+
+	float open = 0.0f;
+	float high = 0.0f;
+	float low = 0.0f;
+	float close = 0.0f;
+	float volume = 0.0f;
+};
+
+struct Order
+{
+	__host__ __device__ Order() {}
+
+	Type type = HOLD;
+	float entryPrice = 0.0f;
+	float stoploss = 0.0f; // If 0.0f, ignore
+	float takeprofit = 0.0f; // If 0.0f, ignore
+	int shares = 0;
+};
+
+struct OrderCombination
+{
+	Order main; // When there is no current open position
+	Order alt; // When there is already an open position
+};
+
+struct AggregatePerformanceData
+{
+	__host__ __device__ AggregatePerformanceData() {}
+
+	float startEquity = 0.0f;
+	float endEquity = 0.0f;
+
+	float totalPNL = 0.0f;
+	float maxDrawdown = 0.0f;
+	float sharpeRatio = 0.0f;
+	float sortinoRatio = 0.0f;
+
+	float successRate = 0.0f;
+	int totalTrades = 0;
+	int winners = 0;
+	int losers = 0;
+	float bestTrade = 0.0f;
+	float worstTrade = 0.0f;
+
+	int stoplossesHit = 0;
+	int takeprofitsHit = 0;
+
+};
+
+
+// Account Tracking
+
+struct AccountData
+{
+	__host__ __device__ AccountData() {}
+
+	float equity = 0.0f; // Equity = Assets - Liabilities;
+	float cash = 0.0f; // Cash is an asset
+	float netAL = 0.0f; // Net assets - liabilities
+
+	// Equity = cash + (assets - liabilities)
+
+	int netShares = 0;
+	float avgPrice = 0.0f;
+	float stoploss = 0.0f; // Max loss that can be taken for current trade
+	float takeprofit = 0.0f; // Max gain that can be taken for current trade
+};
+
+struct AccountDataTracker
+{
+	__host__ __device__ AccountDataTracker() {}
+	devec<AccountData> tracker;
+	int stoplossesHit = 0;
+	int takeprofitsHit = 0;
+};
+
+// Trade Tracking
+
+struct Trade
+{
+	float entryPrice = 0.0f;
+	float exitPrice = 0.0f;
+	int entryShares = 0;
+	int exitShares = 0;
+	float realizedPnL = 0.0f;
+	float unrealizedPnL = 0.0f;
+	float risk = 0.0f;
+	bool isOpen = true;
+	bool isShort = false;
+	float stoploss = 0.0f;
+	float takeprofit = 0.0f;
+
+	__host__ __device__ Trade() {}
+
+	__host__ __device__ void updateTrade(float price, int shares, float _stoploss = 0.0f, float _takeprofit = 0.0f)
+	{
+		entryPrice = ((entryPrice * entryShares) + (price * shares)) / (entryShares + shares);
+		entryShares += shares;
+		stoploss = _stoploss;
+		takeprofit = _takeprofit;
+	}
+
+	__host__ __device__ void closeTrade(float price, int shares)
+	{
+		exitPrice = price;
+		exitShares += shares;
+
+		if (isShort)
+			realizedPnL += (entryPrice - exitPrice) * shares;
+		else
+			realizedPnL += (exitPrice - entryPrice) * shares;
+
+		if (exitShares >= entryShares)
+			isOpen = false;
+	}
+
+	__host__ __device__ void updateUnrealizedPnL(float currentPrice)
+	{
+		if (isShort)
+			unrealizedPnL = (entryPrice - currentPrice) * entryShares;
+		else
+			unrealizedPnL = (currentPrice - entryPrice) * entryShares;
+	}
+};
+
+class TradeTracker
+{
+public:
+	devec<Trade> completedTrades;
+	Trade currentTrade;
+
+	__host__ __device__ TradeTracker()
+	{
+		currentTrade = Trade();
+		currentTrade.isOpen = false;
+	}
+
+	__host__ __device__ void update(float price, const AccountData& previousData, const AccountData& currentData, float stoploss = 0.0f, float takeprofit = 0.0f)
+	{
+		int prevShares = previousData.netShares;
+		int currShares = currentData.netShares;
+		int shareChange = currShares - prevShares;
+
+		if ((prevShares > 0 && currShares < prevShares) || (prevShares < 0 && currShares > prevShares))
+		{
+			closeTrade(price, (abs(shareChange) >= abs(prevShares) ? abs(prevShares) : abs(shareChange)));
+
+			if (currShares * prevShares < 0)
+			{
+				int remainingShares = abs(currShares);
+				bool isShort = currShares < 0;
+				openTrade(price, remainingShares, isShort, stoploss, takeprofit);
+			}
+		}
+		else if (shareChange != 0)
+		{
+			if (prevShares == 0)
+			{
+				bool isShort = currShares < 0;
+				openTrade(price, abs(currShares), isShort, stoploss, takeprofit);
+			}
+			else if (currShares > 0 && prevShares > 0)
+			{
+				currentTrade.updateTrade(price, shareChange, stoploss, takeprofit);
+			}
+			else if (currShares < 0 && prevShares < 0)
+			{
+				currentTrade.updateTrade(price, -shareChange, stoploss, takeprofit);
+			}
+		}
+
+		updateUnrealizedPnL(currentData);
+	}
+
+private:
+	__host__ __device__ void openTrade(float price, int shares, bool isShort, float stoploss = 0.0f, float takeprofit = 0.0f)
+	{
+		currentTrade = Trade();
+		currentTrade.entryPrice = price;
+		currentTrade.entryShares = shares;
+		currentTrade.isShort = isShort;
+		currentTrade.stoploss = stoploss;
+		currentTrade.takeprofit = takeprofit;
+	}
+
+	__host__ __device__ void closeTrade(float price, int shares)
+	{
+		if (currentTrade.isOpen)
+		{
+			currentTrade.closeTrade(price, shares);
+			if (!currentTrade.isOpen)
+				completedTrades.push_back(currentTrade);
+		}
+	}
+
+	__host__ __device__ void updateUnrealizedPnL(const AccountData& currentData)
+	{
+		if (currentTrade.isOpen)
+			currentTrade.updateUnrealizedPnL(currentData.equity / abs(currentData.netShares));
+	}
+};
+
+
+//
+// Backtest Utility Functions
+//
+
+__host__ __device__ bool isValidBuyOrder(const Order& order, const AccountData& accountData) {
+	// Invalid if user has insufficient cash
+	float requiredCash = order.entryPrice * (float)order.shares;
+	float availableCash = accountData.cash;
+
+	return (requiredCash > availableCash) ? false : true;
+}
+
+__host__ __device__ Order marketOrder(Type type, float entryPrice, int shares, float stoploss, float takeprofit)
+{
+	Order order;
+	order.type = type;
+	order.entryPrice = entryPrice;
+	order.shares = shares;
+
+	if (type == BUY && stoploss >= entryPrice)
+		stoploss = 0.0f;
+	else if (type == SELL && stoploss <= entryPrice)
+		stoploss = 0.0f;
+
+	if (type == BUY && takeprofit <= entryPrice)
+		takeprofit = 0.0f;
+	else if (type == SELL && takeprofit >= entryPrice)
+		takeprofit = 0.0f;
+
+	order.stoploss = (stoploss == 0.0f ? 0.0f : (abs(entryPrice - stoploss) * shares));
+	order.takeprofit = (takeprofit == 0.0f ? 0.0f : (abs(takeprofit - entryPrice) * shares));
+
+	return order;
+}
+
+__host__ __device__ void buy(const Order& order, AccountData& accountData)
+{
+	if (isValidBuyOrder(order, accountData))
+	{
+		float position = order.entryPrice * (float)order.shares;
+		accountData.netShares += order.shares;
+		accountData.cash -= position;
+		accountData.netAL += position;
+	}
+	else
+	{
+		int shares = (int)(accountData.cash / order.entryPrice);
+		float position = order.entryPrice * (float)shares;
+		accountData.netShares += shares;
+		accountData.cash = 0;
+		accountData.netAL += position;
+	}
+}
+
+__host__ __device__ void sell(const Order& order, AccountData& accountData)
+{
+	float position = order.entryPrice * (float)order.shares;
+	accountData.netShares -= order.shares;
+	accountData.cash += position;
+	accountData.netAL -= position;
+}
+
+__host__ __device__ void executeOrder(const Order& order, AccountData& accountData)
+{
+	if (order.type == BUY)
+		buy(order, accountData);
+	else if (order.type == SELL)
+		sell(order, accountData);
+}
+
+//
+// Intern
+//
+
+
+
+//
+// Extern
+//
+
+
+//
+// Equilibrium Backtester and Kernels
+//
+
+__device__ AggregatePerformanceData processResults(const AccountDataTracker& accountTracker, const TradeTracker& tradeTracker)
+{
+	AggregatePerformanceData data;
+
+	// 1. Account Statistics
+
+	// Calculate total PNL
+	data.totalPNL = accountTracker.tracker[accountTracker.tracker.size() - 1].equity - accountTracker.tracker[0].equity;
+
+	// Calculate Max Drawdown
+	float peakEquity = accountTracker.tracker[0].equity;
+	float maxDrawdown = 0.0f;
+	for (size_t i = 0; i < accountTracker.tracker.size(); ++i)
+	{
+		AccountData currentData = accountTracker.tracker[i];
+		if (currentData.equity > peakEquity)
+			peakEquity = currentData.equity;
+		float drawdown = (peakEquity - currentData.equity) / peakEquity * 100.0f; // Percentage
+		if (drawdown > maxDrawdown)
+			maxDrawdown = drawdown;
+	}
+	data.maxDrawdown = maxDrawdown;
+
+	// Calculate Sharpe and Sortino Ratio
+	float annualizedRiskFreeRate = 0.03;
+	float dailyRiskFreeRate = powf((1.0f + annualizedRiskFreeRate), (1.0f / 252.0f)) - 1.0f;
+
+	devec<float> returns;
+	float returnsSum = 0.0f;
+	for (size_t i = 1; i < accountTracker.tracker.size(); ++i)
+	{
+		float prevEquity = accountTracker.tracker[i - 1].equity;
+		float currEquity = accountTracker.tracker[i].equity;
+		float excessReturn = logf(currEquity / prevEquity);
+		returns.push_back(excessReturn);
+		returnsSum += excessReturn;
+		//printf("%f\n", excessReturn);
+	}
+
+	float averageExcessReturn = returnsSum / returns.size();
+	float sumSquaredDiffs = 0.0f;
+
+	float negativeSumSquaredDiffs = 0.0f;
+	int numNegativeReturns = 0;
+	for (size_t i = 0; i < returns.size(); ++i)
+	{
+		sumSquaredDiffs += powf(returns[i] - averageExcessReturn, 2);
+		if (returns[i] < 0.0f)
+		{
+			++numNegativeReturns;
+			negativeSumSquaredDiffs += powf(returns[i] - averageExcessReturn, 2);
+		}
+	}
+	float stdDevReturn = sqrtf(sumSquaredDiffs / (returns.size() - 1));
+	float stdDevDownside = sqrtf(negativeSumSquaredDiffs / (numNegativeReturns));
+
+	float startEquity = accountTracker.tracker[0].equity;
+	float finalEquity = accountTracker.tracker[accountTracker.tracker.size() - 1].equity;
+
+	float totalLogReturn = logf(finalEquity / startEquity);
+
+	float annualizedReturn = (totalLogReturn / accountTracker.tracker.size()) * 252;
+	float annualizedRisk = sqrtf(252.0f) * stdDevReturn;
+	float annualizedDownside = sqrtf(252.0f) * stdDevDownside;
+
+	float sharpeRatio = (annualizedReturn - annualizedRiskFreeRate) / annualizedRisk;
+	float sortinoRatio = (annualizedReturn - annualizedRiskFreeRate) / annualizedDownside;
+
+	data.sharpeRatio = sharpeRatio;
+	data.sortinoRatio = sortinoRatio;
+
+	// 2. Trading Log Details
+
+	// Total Trades Completed
+	data.totalTrades = tradeTracker.completedTrades.size();
+	
+	// Winners & Losers
+	int winners = 0;
+	int losers = 0;
+	float bestTrade = FLOAT_MIN;
+	float worstTrade = FLOAT_MAX;
+
+	float overallPnL = 0.0f;
+
+	for (size_t i = 0; i < tradeTracker.completedTrades.size(); ++i)
+	{
+		float pnl = tradeTracker.completedTrades[i].realizedPnL;
+		if (pnl > 0.0f)
+		{
+			winners++;
+		}
+		else
+		{
+			losers++;
+		}
+
+		overallPnL += pnl;
+		
+		//printf("%f (Entry: %f, Exit %f)\n", pnl, tradeTracker.completedTrades[i].entryPrice, tradeTracker.completedTrades[i].exitPrice);
+
+		bestTrade = (bestTrade < pnl) ? pnl : bestTrade;
+		worstTrade = (worstTrade > pnl) ? pnl : worstTrade;
+	}
+
+	// printf("Overall PNL: %f\n", overallPnL);
+	data.totalPNL = overallPnL;
+
+	data.successRate = (float)winners / (float)data.totalTrades;
+	data.winners = winners;
+	data.losers = losers;
+	data.bestTrade = bestTrade;
+	data.worstTrade = worstTrade;
+
+	data.startEquity = accountTracker.tracker[0].equity;
+	data.endEquity = accountTracker.tracker[accountTracker.tracker.size() - 1].equity;
+
+	data.stoplossesHit = accountTracker.stoplossesHit;
+	data.takeprofitsHit = accountTracker.takeprofitsHit;
+
+	return data;
+}
+
+__device__ void backtest(const devec<Databar>& data, const devec<int>& params, AccountData& accountData, AccountDataTracker& accountTracker, TradeTracker& tradeTracker)
+{
+	accountTracker.tracker.push_back(accountData);
+
+	OrderCombination order = system(data, 0, params, accountData);
+
+	float prevStoploss = (order.main.stoploss == 0.0f ? 0.0f : (accountData.equity - order.main.stoploss));
+	float prevTakeprofit = (order.main.takeprofit == 0.0f ? FLOAT_MAX : (accountData.equity + order.main.takeprofit));
+	float prevCash = accountTracker.tracker[0].cash;
+	float prevShares = accountTracker.tracker[0].netShares;
+
+	for (size_t i = 0; i < data.size(); ++i)
+	{
+		// Evaluate system output
+		order = system(data, i, params, accountData);
+
+		// Determine which order to use
+		Order currentOrder;
+		if (i == 0)
+			currentOrder = order.main;
+		else if (tradeTracker.currentTrade.isOpen)
+			currentOrder = order.alt;
+		else
+			currentOrder = order.main;
+
+		accountData.stoploss = (currentOrder.stoploss == 0.0f ? 0.0f : (accountData.equity - currentOrder.stoploss));
+		accountData.takeprofit = (currentOrder.takeprofit == 0.0f ? FLOAT_MAX : (accountData.equity + currentOrder.takeprofit));
+
+		// If no change to stoploss mentioned (i.e. no order for updating stoploss) then leave as is
+		if (prevStoploss != 0.0f && accountData.stoploss == 0.0f)
+			accountData.stoploss = prevStoploss;
+		else if (accountData.stoploss != 0.0f && accountData.stoploss != prevStoploss)
+			prevStoploss = accountData.stoploss;
+
+		if (prevTakeprofit != FLOAT_MAX && accountData.takeprofit == FLOAT_MAX)
+			prevTakeprofit = accountData.takeprofit;
+		else if (accountData.takeprofit != FLOAT_MAX && accountData.takeprofit != prevTakeprofit)
+			prevTakeprofit = accountData.takeprofit;
+
+		
+
+		// Update Account Data (i.e. position valuation)
+		float position = (data[i].close * accountData.netShares); // Using the close value for now
+		accountData.netAL = position;
+		accountData.equity = accountData.cash + accountData.netAL;
+
+		//printf("Prev %f %f %f: %d : %f\n", accountData.equity, accountData.cash, accountData.netAL, accountData.netShares, data[i].close);
+
+		bool stoplossHit = false;
+		bool takeprofitHit = false;
+
+		prevCash = accountTracker.tracker[i].cash;
+		prevShares = accountTracker.tracker[i].netShares;
+
+		if (accountData.equity <= accountData.stoploss)
+		{
+			// Stoploss hit, position automatically closed
+			accountData.netShares = 0;
+			accountData.cash = accountData.stoploss;
+			accountData.equity = accountData.cash;
+			accountData.netAL = 0.0f;
+			stoplossHit = true;
+		}
+		else if (accountData.equity >= accountData.takeprofit)
+		{
+			// Takeprofit hit, position automatically closed
+			accountData.netShares = 0;
+			accountData.cash = accountData.takeprofit;
+			accountData.equity = accountData.cash;
+			accountData.netAL = 0.0f;
+			takeprofitHit = true;
+		}
+
+		accountTracker.tracker.push_back(accountData);
+
+		if (stoplossHit)
+		{
+			tradeTracker.update((prevStoploss - prevCash) / prevShares, accountTracker.tracker[i], accountTracker.tracker[i + 1], currentOrder.stoploss, currentOrder.takeprofit);
+			++accountTracker.stoplossesHit;
+		}
+		else if (takeprofitHit)
+		{
+			tradeTracker.update((prevTakeprofit - prevCash) / prevShares, accountTracker.tracker[i], accountTracker.tracker[i + 1], currentOrder.stoploss, currentOrder.takeprofit);
+			++accountTracker.takeprofitsHit;
+		}
+			
+
+		AccountData prevAccount = accountData; // Account before executing the order but after stoploss/takeprofit
+
+		// Update currentOrder depending on if trade is still open after checking for SL/TP
+		if (tradeTracker.currentTrade.isOpen)
+			currentOrder = order.alt;
+		else
+			currentOrder = order.main;
+
+		executeOrder(currentOrder, accountData);
+
+		// Close the trade if there is an open trade at the end of the backtest period
+		if (i == data.size() - 1)
+		{
+			Order closeOrder;
+			closeOrder.entryPrice = data[i].close;
+			if (accountData.netShares > 0)
+			{
+				closeOrder.shares = accountData.netShares;
+				closeOrder.type = SELL;
+				executeOrder(closeOrder, accountData);
+			}
+			else if(accountData.netShares < 0)
+			{
+				closeOrder.shares = -accountData.netShares;
+				closeOrder.type = BUY;
+				executeOrder(closeOrder, accountData);
+			}
+		}
+
+		accountTracker.tracker[i + 1] = accountData;
+
+		//printf("Curr %f %f %f: %d : %f\n\n\n", accountData.equity, accountData.cash, accountData.netAL, accountData.netShares, data[i].close);
+
+		tradeTracker.update(data[i].close, prevAccount, accountTracker.tracker[i + 1], currentOrder.stoploss, currentOrder.takeprofit);
+	}
+}
+
+extern "C" __global__ void parameterOptimizationKernel(Databar* data, int dataLength, int* paramCombinations, int paramDim, int lengthDim, AggregatePerformanceData* results, AccountData accountData)
+{
+	for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < lengthDim; idx += blockDim.x * gridDim.x)
+	{
+		// Get the current parameters
+		// Parameters are: 
+		// - paramCombinations[paramIdx * lengthDim]
+		// - paramCombinations[paramIdx * lengthDim + 1]
+		// - paramCombinations[paramIdx * lengthDim + 2]
+		// - ...
+		// - paramCombinations[paramIdx * lengthDim + paramDim]
+		
+		devec<int> params;
+
+		for (int i = 0; i < paramDim; ++i)
+		{
+			int val = paramCombinations[idx * paramDim + i];
+			params.push_back(val);
+		}
+
+		
+
+		// Backtest based on those OrderCombinations
+		devec<Databar> dataDevec(data, dataLength);
+
+		AccountData threadAccountData = accountData;
+		AccountDataTracker accountDataTracker;
+		TradeTracker tradeTracker;
+
+		backtest(dataDevec, params, threadAccountData, accountDataTracker, tradeTracker);
+
+		// Summarize AggregatePerformanceData for the current parameter combination
+
+		results[idx] = processResults(accountDataTracker, tradeTracker);
+	}
+}
